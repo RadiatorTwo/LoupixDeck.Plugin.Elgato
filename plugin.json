@@ -1,0 +1,8 @@
+{
+  "id": "elgato",
+  "name": "Elgato Key Lights",
+  "version": "1.0.0",
+  "sdkVersion": "1.1",
+  "entryAssembly": "LoupixDeck.Plugin.Elgato.dll",
+  "platform": "All"
+}

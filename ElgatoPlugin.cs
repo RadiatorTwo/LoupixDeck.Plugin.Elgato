@@ -21,7 +21,7 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
         Id = "elgato",
         Name = "Elgato Key Lights",
         Version = new Version(1, 0, 0),
-        SdkVersion = new Version(1, 1, 0),
+        SdkVersion = new Version(1, 16, 0),
         Author = "RadiatorTwo",
         Description = "Discover and control Elgato Key Lights (brightness, temperature, hue, saturation)."
     };
@@ -60,6 +60,17 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
     public override void Shutdown() => _controller.Dispose();
 
     public override IEnumerable<IPluginCommand> GetCommands() => _commands;
+
+    public override IReadOnlyList<CommandGroupDescriptor> GetCommandGroups() =>
+    [
+        new CommandGroupDescriptor
+        {
+            Group = "Elgato Keylights",
+            Description = "Key light control",
+            Icon = "\U000F0335",
+            Section = CommandGroupSection.Plugins
+        }
+    ];
 
     private async void OnKeyLightFound(object? sender, KeyLight light)
     {

@@ -44,17 +44,20 @@ internal abstract class ElgatoCommandBase(ElgatoController elgato, ElgatoDevices
     }
 
     /// <summary>Builds a descriptor for an Elgato command. All Elgato commands
-    /// are surfaced per Key Light through the dynamic menu, never as flat leaves.</summary>
+    /// are surfaced per Key Light through the dynamic menu, never as flat leaves.
+    /// Each extra parameter is an int with an optional command-defined default value
+    /// (SDK 1.17), which pre-fills the command's settings flyout on insert.</summary>
     protected static CommandDescriptor Describe(
-        string name, string display, string icon, string description, params string[] extraParams)
+        string name, string display, string icon, string description,
+        params (string Name, string? Default)[] extraParams)
     {
         var parameters = new List<CommandParameter> { new("KeyLightName", typeof(string)) };
         foreach (var p in extraParams)
-            parameters.Add(new CommandParameter(p, typeof(int)));
+            parameters.Add(new CommandParameter(p.Name, typeof(int)) { DefaultValue = p.Default });
 
         var template = extraParams.Length == 0
             ? "({KeyLightName})"
-            : "({KeyLightName}," + string.Join(",", extraParams.Select(p => "{" + p + "}")) + ")";
+            : "({KeyLightName}," + string.Join(",", extraParams.Select(p => "{" + p.Name + "}")) + ")";
 
         return new CommandDescriptor
         {
@@ -84,7 +87,7 @@ internal sealed class ElgatoKeylightTemperatureCommand(ElgatoController elgato, 
 {
     public override CommandDescriptor Descriptor { get; } =
         Describe("System.ElgKlTemperature", "Set Temperature",
-            "\U000F05A8", "Set the color temperature", "Temperature");
+            "\U000F05A8", "Set the color temperature", ("Temperature", null));
 
     protected override Task Run(KeyLight keyLight, string[] parameters) =>
         Elgato.SetTemperature(keyLight, ParseInt(parameters, 1));
@@ -95,7 +98,7 @@ internal sealed class ElgatoKeylightBrightnessCommand(ElgatoController elgato, E
 {
     public override CommandDescriptor Descriptor { get; } =
         Describe("System.ElgKlBrightness", "Set Brightness",
-            "\U000F00DF", "Set the brightness level", "Brightness");
+            "\U000F00DF", "Set the brightness level", ("Brightness", "50"));
 
     protected override Task Run(KeyLight keyLight, string[] parameters) =>
         Elgato.SetBrightness(keyLight, ParseInt(parameters, 1));
@@ -106,7 +109,7 @@ internal sealed class ElgatoKeylightSaturationCommand(ElgatoController elgato, E
 {
     public override CommandDescriptor Descriptor { get; } =
         Describe("System.ElgKlSaturation", "Set Saturation",
-            "\U000F062E", "Set the saturation value", "Saturation");
+            "\U000F062E", "Set the saturation value", ("Saturation", null));
 
     protected override Task Run(KeyLight keyLight, string[] parameters) =>
         Elgato.SetSaturation(keyLight, ParseInt(parameters, 1));
@@ -116,7 +119,7 @@ internal sealed class ElgatoKeylightHueCommand(ElgatoController elgato, ElgatoDe
     : ElgatoCommandBase(elgato, devices)
 {
     public override CommandDescriptor Descriptor { get; } = Describe(
-        "System.ElgKlHue", "Set Hue", "\U000F062E", "Set the hue value", "Hue");
+        "System.ElgKlHue", "Set Hue", "\U000F062E", "Set the hue value", ("Hue", null));
 
     protected override Task Run(KeyLight keyLight, string[] parameters) =>
         Elgato.SetHue(keyLight, ParseInt(parameters, 1));
@@ -127,7 +130,7 @@ internal sealed class ElgatoKeylightChangeBrightnessCommand(ElgatoController elg
 {
     public override CommandDescriptor Descriptor { get; } =
         Describe("System.ElgKlChangeBrightness", "Change Brightness",
-            "\U000F00DF", "Adjust brightness by a step", "Step");
+            "\U000F00DF", "Adjust brightness by a step", ("Step", "5"));
 
     protected override Task Run(KeyLight keyLight, string[] parameters) =>
         Elgato.SetBrightness(keyLight, keyLight.Brightness + ParseInt(parameters, 1));
@@ -138,7 +141,7 @@ internal sealed class ElgatoKeylightChangeTemperatureCommand(ElgatoController el
 {
     public override CommandDescriptor Descriptor { get; } =
         Describe("System.ElgKlChangeTemperature", "Change Temperature",
-            "\U000F05A8", "Adjust color temperature by a step", "Step");
+            "\U000F05A8", "Adjust color temperature by a step", ("Step", "10"));
 
     protected override Task Run(KeyLight keyLight, string[] parameters) =>
         Elgato.SetTemperature(keyLight, keyLight.Temperature + ParseInt(parameters, 1));
@@ -149,7 +152,7 @@ internal sealed class ElgatoKeylightChangeSaturationCommand(ElgatoController elg
 {
     public override CommandDescriptor Descriptor { get; } =
         Describe("System.ElgKlChangeSaturation", "Change Saturation",
-            "\U000F062E", "Adjust saturation by a step", "Step");
+            "\U000F062E", "Adjust saturation by a step", ("Step", "5"));
 
     protected override Task Run(KeyLight keyLight, string[] parameters) =>
         Elgato.SetSaturation(keyLight, keyLight.Saturation + ParseInt(parameters, 1));
@@ -160,7 +163,7 @@ internal sealed class ElgatoKeylightChangeHueCommand(ElgatoController elgato, El
 {
     public override CommandDescriptor Descriptor { get; } =
         Describe("System.ElgKlChangeHue", "Change Hue",
-            "\U000F062E", "Adjust hue by a step", "Step");
+            "\U000F062E", "Adjust hue by a step", ("Step", "10"));
 
     protected override Task Run(KeyLight keyLight, string[] parameters) =>
         Elgato.SetHue(keyLight, keyLight.Hue + ParseInt(parameters, 1));

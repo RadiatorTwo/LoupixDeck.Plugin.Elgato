@@ -15,6 +15,11 @@ public sealed class ElgatoController : IDisposable
 
     private ZeroconfResolver.ResolverListener? _listener;
 
+    /// <summary>Cancels the running discovery probe. Disposing the controller (which
+    /// the host does on plugin shutdown/unload) ends the probe immediately, so no
+    /// discovery callback can run after the plugin's load context is gone.</summary>
+    private CancellationTokenSource? _probeCts;
+
     private readonly HttpClient _httpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(2)
@@ -22,22 +27,49 @@ public sealed class ElgatoController : IDisposable
 
     public async Task ProbeForElgatoDevices()
     {
-        _listener?.Dispose();
-        _listener = ZeroconfResolver.CreateListener("_elg._tcp.local.", 4000, 2, TimeSpan.FromMinutes(2));
+        // A rescan supersedes the running probe.
+        _probeCts?.Cancel();
+        _probeCts?.Dispose();
+        CancellationTokenSource cts = _probeCts = new CancellationTokenSource();
 
-        _listener.ServiceFound += (s, e) =>
+        _listener?.Dispose();
+        ZeroconfResolver.ResolverListener listener = _listener =
+            ZeroconfResolver.CreateListener("_elg._tcp.local.", 4000, 2, TimeSpan.FromMinutes(2));
+
+        listener.ServiceFound += (s, e) =>
         {
+            // A callback still in flight when the probe was cancelled must not reach
+            // the plugin — it would resurrect a shut-down instance.
+            if (cts.IsCancellationRequested)
+                return;
+
             var keyLight = new KeyLight(e.DisplayName, e.Services.Values.First().Port, e.IPAddress);
             KeyLightFound?.Invoke(s, keyLight);
         };
 
-        _listener.ServiceLost += (s, e) => KeyLightDisconnected?.Invoke(s, e.DisplayName);
+        listener.ServiceLost += (s, e) =>
+        {
+            if (cts.IsCancellationRequested)
+                return;
 
-        // Give the Key Lights two minutes to announce themselves.
-        await Task.Delay(TimeSpan.FromMinutes(2));
+            KeyLightDisconnected?.Invoke(s, e.DisplayName);
+        };
 
-        _listener.Dispose();
-        _listener = null;
+        try
+        {
+            // Give the Key Lights two minutes to announce themselves.
+            await Task.Delay(TimeSpan.FromMinutes(2), cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown or a rescan ended the probe early.
+        }
+        finally
+        {
+            listener.Dispose();
+            if (ReferenceEquals(_listener, listener))
+                _listener = null;
+        }
     }
 
     public async Task<bool> InitDeviceAsync(KeyLight keyLight)
@@ -138,6 +170,12 @@ public sealed class ElgatoController : IDisposable
 
     public void Dispose()
     {
+        // Cancel before disposing so the awaiting probe unwinds through its finally
+        // block instead of outliving the controller.
+        _probeCts?.Cancel();
+        _probeCts?.Dispose();
+        _probeCts = null;
+
         _listener?.Dispose();
         _httpClient.Dispose();
     }

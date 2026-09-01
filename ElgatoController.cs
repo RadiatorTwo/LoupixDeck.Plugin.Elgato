@@ -82,6 +82,20 @@ public sealed class ElgatoController : IDisposable
         }
     }
 
+    /// <summary>
+    /// A single bounded scan, for the settings page's rescan action. It returns the
+    /// lights it saw as soon as the scan window closes, instead of awaiting the
+    /// long-lived listener — which would keep the action spinning for two minutes.
+    /// The background probe is left running.
+    /// </summary>
+    public async Task<IReadOnlyList<KeyLight>> RescanAsync(CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<IZeroconfHost> hosts = await ZeroconfResolver.ResolveAsync(
+            Protocol, ScanTime, cancellationToken: cancellationToken);
+
+        return hosts.Select(ToKeyLight).ToList();
+    }
+
     private static KeyLight ToKeyLight(IZeroconfHost host) =>
         new(host.DisplayName, host.Services.Values.First().Port, host.IPAddress);
 

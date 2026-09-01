@@ -13,6 +13,7 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
 
     private readonly ElgatoController _controller = new();
     private readonly ElgatoDevices _devices = new();
+    private readonly SemaphoreSlim _registryGate = new(1, 1);
     private List<IPluginCommand> _commands = [];
     private IPluginHost? _host;
 
@@ -72,7 +73,13 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
         }
     ];
 
-    private async void OnKeyLightFound(object? sender, KeyLight light)
+    private async void OnKeyLightFound(object? sender, KeyLight light) => await RegisterKeyLight(light);
+
+    /// <summary>
+    /// Queries a discovered light and swaps it into the registry. Serialized because
+    /// the background listener and the settings page's rescan both feed into it.
+    /// </summary>
+    private async Task RegisterKeyLight(KeyLight light)
     {
         // Query the light BEFORE touching the registry. Replacing the known entry
         // first meant a failing probe dropped the light from the list and — through
@@ -88,11 +95,19 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
             return;
         }
 
-        var existing = _devices.KeyLights.FirstOrDefault(kl => kl.DisplayName == light.DisplayName);
-        if (existing != null)
-            _devices.RemoveKeyLight(existing);
+        await _registryGate.WaitAsync();
+        try
+        {
+            var existing = _devices.KeyLights.FirstOrDefault(kl => kl.DisplayName == light.DisplayName);
+            if (existing != null)
+                _devices.RemoveKeyLight(existing);
 
-        _devices.AddKeyLight(light);
+            _devices.AddKeyLight(light);
+        }
+        finally
+        {
+            _registryGate.Release();
+        }
     }
 
     private void SaveKeyLights()
@@ -150,7 +165,12 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
             Label = "Rescan for Key Lights",
             Invoke = async () =>
             {
-                await _controller.ProbeForElgatoDevices();
+                // A short, bounded scan. Awaiting ProbeForElgatoDevices instead would
+                // hold the action for the listener's full two-minute lifetime.
+                IReadOnlyList<KeyLight> found = await _controller.RescanAsync();
+                foreach (KeyLight light in found)
+                    await RegisterKeyLight(light);
+
                 return $"{_devices.KeyLights.Count} Key Light(s) known.";
             }
         }

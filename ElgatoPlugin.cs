@@ -22,7 +22,7 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
         Id = "elgato",
         Name = "Elgato Key Lights",
         Version = new Version(1, 1, 0),
-        SdkVersion = new Version(1, 16, 0),
+        SdkVersion = new Version(1, 17, 0),
         Author = "RadiatorTwo",
         Description = "Discover and control Elgato Key Lights (brightness, temperature, hue, saturation)."
     };

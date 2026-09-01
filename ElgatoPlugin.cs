@@ -13,6 +13,7 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
 
     private readonly ElgatoController _controller = new();
     private readonly ElgatoDevices _devices = new();
+    private readonly SemaphoreSlim _registryGate = new(1, 1);
     private List<IPluginCommand> _commands = [];
     private IPluginHost? _host;
 
@@ -20,7 +21,7 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
     {
         Id = "elgato",
         Name = "Elgato Key Lights",
-        Version = new Version(1, 0, 0),
+        Version = new Version(1, 1, 0),
         SdkVersion = new Version(1, 16, 0),
         Author = "RadiatorTwo",
         Description = "Discover and control Elgato Key Lights (brightness, temperature, hue, saturation)."
@@ -72,20 +73,40 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
         }
     ];
 
-    private async void OnKeyLightFound(object? sender, KeyLight light)
+    private async void OnKeyLightFound(object? sender, KeyLight light) => await RegisterKeyLight(light);
+
+    /// <summary>
+    /// Queries a discovered light and swaps it into the registry. Serialized because
+    /// the background listener and the settings page's rescan both feed into it.
+    /// </summary>
+    private async Task RegisterKeyLight(KeyLight light)
     {
+        // Query the light BEFORE touching the registry. Replacing the known entry
+        // first meant a failing probe dropped the light from the list and — through
+        // KeyLightRemoved -> SaveKeyLights — from the settings file as well, so a
+        // single unreachable light erased it until the next successful discovery.
+        try
+        {
+            await _controller.InitDeviceAsync(light);
+        }
+        catch (Exception ex)
+        {
+            _host?.Logger.Warn($"Failed to initialize Key Light '{light.DisplayName}': {ex.Message}");
+            return;
+        }
+
+        await _registryGate.WaitAsync();
         try
         {
             var existing = _devices.KeyLights.FirstOrDefault(kl => kl.DisplayName == light.DisplayName);
             if (existing != null)
                 _devices.RemoveKeyLight(existing);
 
-            await _controller.InitDeviceAsync(light);
             _devices.AddKeyLight(light);
         }
-        catch (Exception ex)
+        finally
         {
-            _host?.Logger.Warn($"Failed to initialize Key Light '{light.DisplayName}': {ex.Message}");
+            _registryGate.Release();
         }
     }
 
@@ -118,6 +139,15 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
             keyLightNodes.Add(new MenuNode { Name = keyLight.DisplayName, Children = commandLeaves });
         }
 
+        // With no known light the group would be empty; the host then shows it as a
+        // bare card with no explanation. A single informational leaf (no command, no
+        // children) states why instead — the host renders it as a non-actionable row.
+        if (keyLightNodes.Count == 0)
+            keyLightNodes.Add(new MenuNode
+            {
+                Name = "No Key Lights found — use 'Rescan for Key Lights' in Settings -> Plugins"
+            });
+
         IReadOnlyList<MenuNode> result =
             [new MenuNode { Name = "Elgato Keylights", Children = keyLightNodes }];
 
@@ -135,7 +165,12 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
             Label = "Rescan for Key Lights",
             Invoke = async () =>
             {
-                await _controller.ProbeForElgatoDevices();
+                // A short, bounded scan. Awaiting ProbeForElgatoDevices instead would
+                // hold the action for the listener's full two-minute lifetime.
+                IReadOnlyList<KeyLight> found = await _controller.RescanAsync();
+                foreach (KeyLight light in found)
+                    await RegisterKeyLight(light);
+
                 return $"{_devices.KeyLights.Count} Key Light(s) known.";
             }
         }

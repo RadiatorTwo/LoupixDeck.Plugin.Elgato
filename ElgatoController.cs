@@ -15,30 +15,89 @@ public sealed class ElgatoController : IDisposable
 
     private ZeroconfResolver.ResolverListener? _listener;
 
+    /// <summary>Cancels the running discovery probe. Disposing the controller (which
+    /// the host does on plugin shutdown/unload) ends the probe immediately, so no
+    /// discovery callback can run after the plugin's load context is gone.</summary>
+    private CancellationTokenSource? _probeCts;
+
     private readonly HttpClient _httpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(2)
     };
 
+    /// <summary>
+    /// How long a single mDNS scan collects answers before reporting them — Zeroconf's
+    /// own default. This used to be set to two minutes, which is the listener's total
+    /// lifetime, not its scan window: every discovery round then sat silent for two
+    /// minutes before surfacing a single light.
+    /// </summary>
+    private static readonly TimeSpan ScanTime = TimeSpan.FromSeconds(2);
+
+    /// <summary>The mDNS service type Elgato Key Lights announce themselves under.</summary>
+    private const string Protocol = "_elg._tcp.local.";
+
     public async Task ProbeForElgatoDevices()
     {
-        _listener?.Dispose();
-        _listener = ZeroconfResolver.CreateListener("_elg._tcp.local.", 4000, 2, TimeSpan.FromMinutes(2));
+        // A rescan supersedes the running probe.
+        _probeCts?.Cancel();
+        _probeCts?.Dispose();
+        CancellationTokenSource cts = _probeCts = new CancellationTokenSource();
 
-        _listener.ServiceFound += (s, e) =>
+        _listener?.Dispose();
+        ZeroconfResolver.ResolverListener listener = _listener = ZeroconfResolver.CreateListener(
+            Protocol, queryInterval: 4000, pingsUntilRemove: 2, scanTime: ScanTime);
+
+        listener.ServiceFound += (s, e) =>
         {
-            var keyLight = new KeyLight(e.DisplayName, e.Services.Values.First().Port, e.IPAddress);
-            KeyLightFound?.Invoke(s, keyLight);
+            // A callback still in flight when the probe was cancelled must not reach
+            // the plugin — it would resurrect a shut-down instance.
+            if (cts.IsCancellationRequested)
+                return;
+
+            KeyLightFound?.Invoke(s, ToKeyLight(e));
         };
 
-        _listener.ServiceLost += (s, e) => KeyLightDisconnected?.Invoke(s, e.DisplayName);
+        listener.ServiceLost += (s, e) =>
+        {
+            if (cts.IsCancellationRequested)
+                return;
 
-        // Give the Key Lights two minutes to announce themselves.
-        await Task.Delay(TimeSpan.FromMinutes(2));
+            KeyLightDisconnected?.Invoke(s, e.DisplayName);
+        };
 
-        _listener.Dispose();
-        _listener = null;
+        try
+        {
+            // Give the Key Lights two minutes to announce themselves.
+            await Task.Delay(TimeSpan.FromMinutes(2), cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown or a rescan ended the probe early.
+        }
+        finally
+        {
+            listener.Dispose();
+            if (ReferenceEquals(_listener, listener))
+                _listener = null;
+        }
     }
+
+    /// <summary>
+    /// A single bounded scan, for the settings page's rescan action. It returns the
+    /// lights it saw as soon as the scan window closes, instead of awaiting the
+    /// long-lived listener — which would keep the action spinning for two minutes.
+    /// The background probe is left running.
+    /// </summary>
+    public async Task<IReadOnlyList<KeyLight>> RescanAsync(CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<IZeroconfHost> hosts = await ZeroconfResolver.ResolveAsync(
+            Protocol, ScanTime, cancellationToken: cancellationToken);
+
+        return hosts.Select(ToKeyLight).ToList();
+    }
+
+    private static KeyLight ToKeyLight(IZeroconfHost host) =>
+        new(host.DisplayName, host.Services.Values.First().Port, host.IPAddress);
 
     public async Task<bool> InitDeviceAsync(KeyLight keyLight)
     {
@@ -138,6 +197,12 @@ public sealed class ElgatoController : IDisposable
 
     public void Dispose()
     {
+        // Cancel before disposing so the awaiting probe unwinds through its finally
+        // block instead of outliving the controller.
+        _probeCts?.Cancel();
+        _probeCts?.Dispose();
+        _probeCts = null;
+
         _listener?.Dispose();
         _httpClient.Dispose();
     }

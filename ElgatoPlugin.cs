@@ -74,19 +74,25 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
 
     private async void OnKeyLightFound(object? sender, KeyLight light)
     {
+        // Query the light BEFORE touching the registry. Replacing the known entry
+        // first meant a failing probe dropped the light from the list and — through
+        // KeyLightRemoved -> SaveKeyLights — from the settings file as well, so a
+        // single unreachable light erased it until the next successful discovery.
         try
         {
-            var existing = _devices.KeyLights.FirstOrDefault(kl => kl.DisplayName == light.DisplayName);
-            if (existing != null)
-                _devices.RemoveKeyLight(existing);
-
             await _controller.InitDeviceAsync(light);
-            _devices.AddKeyLight(light);
         }
         catch (Exception ex)
         {
             _host?.Logger.Warn($"Failed to initialize Key Light '{light.DisplayName}': {ex.Message}");
+            return;
         }
+
+        var existing = _devices.KeyLights.FirstOrDefault(kl => kl.DisplayName == light.DisplayName);
+        if (existing != null)
+            _devices.RemoveKeyLight(existing);
+
+        _devices.AddKeyLight(light);
     }
 
     private void SaveKeyLights()

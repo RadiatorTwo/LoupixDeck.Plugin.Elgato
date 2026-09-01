@@ -124,6 +124,15 @@ public sealed class ElgatoPlugin : LoupixPlugin, IMenuContributor, IPluginSettin
             keyLightNodes.Add(new MenuNode { Name = keyLight.DisplayName, Children = commandLeaves });
         }
 
+        // With no known light the group would be empty; the host then shows it as a
+        // bare card with no explanation. A single informational leaf (no command, no
+        // children) states why instead — the host renders it as a non-actionable row.
+        if (keyLightNodes.Count == 0)
+            keyLightNodes.Add(new MenuNode
+            {
+                Name = "No Key Lights found — use 'Rescan for Key Lights' in Settings -> Plugins"
+            });
+
         IReadOnlyList<MenuNode> result =
             [new MenuNode { Name = "Elgato Keylights", Children = keyLightNodes }];
 

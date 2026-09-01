@@ -25,6 +25,17 @@ public sealed class ElgatoController : IDisposable
         Timeout = TimeSpan.FromSeconds(2)
     };
 
+    /// <summary>
+    /// How long a single mDNS scan collects answers before reporting them — Zeroconf's
+    /// own default. This used to be set to two minutes, which is the listener's total
+    /// lifetime, not its scan window: every discovery round then sat silent for two
+    /// minutes before surfacing a single light.
+    /// </summary>
+    private static readonly TimeSpan ScanTime = TimeSpan.FromSeconds(2);
+
+    /// <summary>The mDNS service type Elgato Key Lights announce themselves under.</summary>
+    private const string Protocol = "_elg._tcp.local.";
+
     public async Task ProbeForElgatoDevices()
     {
         // A rescan supersedes the running probe.
@@ -33,8 +44,8 @@ public sealed class ElgatoController : IDisposable
         CancellationTokenSource cts = _probeCts = new CancellationTokenSource();
 
         _listener?.Dispose();
-        ZeroconfResolver.ResolverListener listener = _listener =
-            ZeroconfResolver.CreateListener("_elg._tcp.local.", 4000, 2, TimeSpan.FromMinutes(2));
+        ZeroconfResolver.ResolverListener listener = _listener = ZeroconfResolver.CreateListener(
+            Protocol, queryInterval: 4000, pingsUntilRemove: 2, scanTime: ScanTime);
 
         listener.ServiceFound += (s, e) =>
         {
@@ -43,8 +54,7 @@ public sealed class ElgatoController : IDisposable
             if (cts.IsCancellationRequested)
                 return;
 
-            var keyLight = new KeyLight(e.DisplayName, e.Services.Values.First().Port, e.IPAddress);
-            KeyLightFound?.Invoke(s, keyLight);
+            KeyLightFound?.Invoke(s, ToKeyLight(e));
         };
 
         listener.ServiceLost += (s, e) =>
@@ -71,6 +81,9 @@ public sealed class ElgatoController : IDisposable
                 _listener = null;
         }
     }
+
+    private static KeyLight ToKeyLight(IZeroconfHost host) =>
+        new(host.DisplayName, host.Services.Values.First().Port, host.IPAddress);
 
     public async Task<bool> InitDeviceAsync(KeyLight keyLight)
     {

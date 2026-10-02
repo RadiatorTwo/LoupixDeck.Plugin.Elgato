@@ -1,6 +1,6 @@
 # Plugin icon generator
 
-`make_icon.py` draws the plugin icon: a glowing LED panel light on a pole, matte, night blue.
+`make_icon.py` draws the plugin icon: a square LED panel light seen from the front, glowing, with short light rays; matte, night blue.
 It follows the Audio and CoolerControl plugin icons (same background, colors and shading) and is
 original artwork, no third-party source. The Elgato logo and product artwork are not used.
 

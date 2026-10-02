@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""LoupixDeck Elgato plugin icon (key light panel on a pole, matte, night blue).
+"""LoupixDeck Elgato plugin icon (glowing panel light with rays, matte, night blue).
 
 Same look as the Audio and CoolerControl plugin icons: background, colors and shading are
-shared; the subject is a generic LED panel light with a glowing diffuser.
+shared; the subject is a square LED panel seen from the front, with short light rays around it.
 
 Requires: pip install pillow numpy
 Usage:    python make_icon.py [output_dir]
@@ -41,6 +41,7 @@ BG = oklch(0.24, 0.02, 260)
 EDGE = oklch(0.32, 0.02, 260)
 LIGHT = oklch(0.97, 0.03, 85)    # warm white diffuser
 GLOW = oklch(0.90, 0.08, 85)     # halo around the panel
+RAY = oklch(0.88, 0.09, 80)      # light rays
 
 # ---------- Masks ----------
 def _mask(draw_fn):
@@ -116,8 +117,25 @@ def linear_gradient(box, css_deg, stops):
 
 
 
-# ---------- Draw ----------
+# ---------- Rays ----------
 C = 128
+
+
+def rays(n, r0, r1, w, offset_deg=0.0):
+    """n round-capped strokes from radius r0 to r1 around the center, w px wide."""
+    im = Image.new("L", (N, N), 0)
+    d = ImageDraw.Draw(im)
+    for k in range(n):
+        a = math.radians(offset_deg + k * 360 / n)
+        dx, dy = math.sin(a), -math.cos(a)
+        d.line([((C + dx * r0) * SS, (C + dy * r0) * SS), ((C + dx * r1) * SS, (C + dy * r1) * SS)], fill=255, width=int(w * SS))
+        for r in (r0, r1):
+            x, y = C + dx * r, C + dy * r
+            d.ellipse([(x - w / 2) * SS, (y - w / 2) * SS, (x + w / 2) * SS, (y + w / 2) * SS], fill=255)
+    return np.asarray(im, dtype=np.float32) / 255.0
+
+
+# ---------- Draw ----------
 icon = rrect(0, 0, SIZE, SIZE, 58)
 
 # Background + 1px inner edge
@@ -125,37 +143,30 @@ paint(BG, icon)
 paint(EDGE, icon - rrect(1, 1, SIZE - 2, SIZE - 2, 57))
 
 # Panel geometry
-PW, PH, PR = 176, 120, 24
-PX, PY = C - PW / 2, 34
-panel = rrect(PX, PY, PW, PH, PR)
-
-# Pole, joint and desk clamp (drawn behind the panel)
-pole = rrect(C - 7, PY + PH - 10, 14, 222 - (PY + PH - 10), 7)
-clamp = rrect(C - 26, 212, 52, 16, 6)
-stand = np.maximum(pole, clamp)
-drop_shadow(stand, 0, 6, 10, oklch(0.04, 0.04, 260, 0.70), icon)
-paint(linear_gradient((C - 26, PY + PH, 52, 228 - PY - PH), 90,
-                      [(0, oklch(0.62, 0.01, 260)[:3]), (0.5, oklch(0.80, 0.008, 260)[:3]), (1, oklch(0.60, 0.01, 260)[:3])]), stand)
-inset_shadow(clamp, 0, -2, 3, oklch(0.3, 0.02, 260, 0.35))
+PS, PR = 116, 22
+P0 = C - PS / 2
+panel = rrect(P0, P0, PS, PS, PR)
 
 # Soft halo of the light on the background
-paint(GLOW, blur(panel, 56) * 0.75 * icon)
-paint(GLOW, blur(panel, 18) * 0.45 * icon)
+paint(GLOW, blur(panel, 50) * 0.6 * icon)
 
 # Panel frame (plastic, matte)
 drop_shadow(panel, 0, 16, 24, oklch(0.04, 0.04, 260, 0.80), icon)
 drop_shadow(panel, 0, 4, 3, oklch(0.06, 0.03, 260, 0.55), icon)
-paint(linear_gradient((PX, PY, PW, PH), 160, [(0, oklch(0.93, 0.006, 260)[:3]), (1, oklch(0.76, 0.01, 260)[:3])]), panel)
+paint(linear_gradient((P0, P0, PS, PS), 160, [(0, oklch(0.93, 0.006, 260)[:3]), (1, oklch(0.76, 0.01, 260)[:3])]), panel)
 inset_shadow(panel, 0, -3, 4, oklch(0.4, 0.02, 260, 0.35))
 inset_shadow(panel, 0, 2, 2, (1, 1, 1, 0.45))
 
-# Diffuser: warm white, brightest in the middle, slightly recessed into the frame
-B = 7
-face = rrect(PX + B, PY + B, PW - 2 * B, PH - 2 * B, PR - B)
+# Diffuser: warm white, brightest in the middle
+B = 8
+face = rrect(P0 + B, P0 + B, PS - 2 * B, PS - 2 * B, PR - B + 1)
 paint(LIGHT, face)
-t = np.clip(np.hypot((XX - C) / (PW / 2), (YY - (PY + PH / 2)) / (PH / 2)), 0, 1)
+t = np.clip(np.hypot(XX - C, YY - C) / 70, 0, 1)
 paint(oklch(0.90, 0.06, 80), face * (0.45 * t ** 2.2))
 inset_shadow(face, 0, 2, 3, oklch(0.55, 0.04, 80, 0.25))
+
+# Light rays
+paint(RAY, rays(8, 84, 104, 10) * icon)
 
 # Clip to the icon shape
 canvas[..., 3] *= icon
